@@ -806,3 +806,906 @@ For your situation, the right move is to keep agile as the structural backbone, 
 If it'd help, I could sketch what a hybrid flow looks like concretely — showing where in your week-to-week agile cadence the agent enters, what it's allowed to draft, what stays human-only, and how the artifacts from the agile world feed into and out of the agent's working context. That's where the rubber actually meets the road.
 
 ---
+
+## User
+
+in the AI coding agent world. I have questions:
+
+* what the AGENTS.md should contain?
+* what the PRD document should contain?
+
+## Claude
+
+Two good questions, and they're worth answering carefully because both documents have a lot of bad templates floating around. Let me give you a clear picture of each, then point at how they relate to each other so you don't accidentally duplicate content between them.
+
+### What `AGENTS.md` should contain
+
+`AGENTS.md` (and its variants `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`) is the **persistent, repo-level context the agent loads on every interaction**. It's not a spec for any particular feature — it's the rules of the house. The audience is the agent, with humans as a secondary audience.
+
+The principle that matters most: **every line should answer a question the agent would otherwise get wrong.** Generic best-practice content ("write clean code," "follow SOLID principles") is worse than nothing — it bloats the context window and trains the agent to ignore the document. Concrete, repo-specific rules earn their place. Generic platitudes don't.
+
+A useful `AGENTS.md` typically covers:
+
+**Project orientation.** One paragraph: what this service is, who owns it, what bounded context it sits in, and what it absolutely is not responsible for. The "is not" sentence is doing real work — it stops the agent from helpfully extending scope.
+
+**Tech stack and versions.** Language version, framework, key libraries, package manager, build tool. Specific. "Python 3.11, FastAPI, Poetry, ruff, mypy strict" beats "Python and a web framework." Version pins matter because the agent will otherwise reach for syntax or library APIs from a different version.
+
+**How to run, test, and lint.** The exact commands. `make test`, `poetry run pytest tests/integration -k smoke`, etc. This is what lets the agent verify its own work. If the commands aren't here, it'll guess and run the wrong thing.
+
+**Repository layout.** A short tree of the top-level directories with a sentence each on what lives where. Especially valuable: which directories the agent is *not* allowed to touch (legacy code, generated code, vendored dependencies, infra-as-code that needs review).
+
+**Conventions specific to this repo.** Not generic style — the things that, if the agent gets them wrong, you'll catch in review. For example: "All HTTP handlers go through the `RequestContext` middleware. Never instantiate one directly." "Errors must use `pkg/errors.AppError`; do not invent new error types." "Database migrations live in `db/migrations` and are append-only — never modify a merged migration." "Tests use the `factories/` builders, never construct domain objects directly in tests." Each rule should map to a real failure you've seen.
+
+**Contracts and ownership.** Where the contracts you publish live (paths, schema-registry URLs, OpenAPI files), where contracts you consume live, and which team owns each. Plus: which contracts the agent is allowed to modify and which require human cross-team negotiation. This section is the most valuable one in a multi-team context and the most often missing.
+
+**Testing strategy.** What gets tested at which layer, what the coverage expectation is, what's mocked vs. real. "Unit tests for domain logic; integration tests against a real Postgres in Docker; contract tests against the schema registry; no mocks of our own code." The agent will otherwise default to mocking everything, which is rarely what you want.
+
+**What requires explicit human approval.** Schema changes, public API changes, dependency additions, anything touching auth or money, infrastructure changes. The rule is: when the agent encounters one of these, it should stop and ask, not propose a plan.
+
+**How to commit and PR.** Branch naming, commit message format (Conventional Commits or whatever you use), PR template, what the PR description must reference (linked issue, feature spec, ADR). Small but high-leverage; saves a round trip on every PR.
+
+**Pointers to deeper docs.** Links to the architecture overview, the runbook, the on-call doc, the team's spec template, the constitution changelog. Don't inline these — link them. Keep `AGENTS.md` lean.
+
+A few things `AGENTS.md` deliberately should *not* contain:
+
+It shouldn't contain generic coding advice. The agent already knows what good code looks like in the abstract. What it doesn't know is what's idiomatic *here*.
+
+It shouldn't contain feature-specific information. That's what feature specs are for. If you find yourself adding "for the order-batching feature, do X," you're using the wrong document.
+
+It shouldn't restate things the codebase already shows. The agent can read your code. It can't infer "we don't use this pattern anymore even though it's still in the codebase" — that has to be written down. But it can infer "we use FastAPI" from the imports, so don't waste a line on it unless there's a version constraint.
+
+It shouldn't be aspirational. "We strive for 90% test coverage" is meaningless. Either the rule is enforced ("PRs failing coverage check are blocked") and worth stating with the threshold, or it's not, and stating it just teaches the agent to ignore the document.
+
+Length-wise, aim for under 200 lines. If it's longer, the agent won't reliably attend to all of it and humans won't read it. Several teams I've seen split it: a top-level `AGENTS.md` with the universal rules, plus per-directory `AGENTS.md` files that the agent loads when working in that subtree. That's a good pattern when one document gets too big.
+
+### What a PRD should contain
+
+This one needs a caveat first. **"PRD" is being used in two different senses in the AI-agent world**, and confusing them is the main reason the question is hard.
+
+In **traditional product management**, a PRD is a heavyweight document — owned by a PM, often 10+ pages — that justifies investment in a piece of work. It covers market context, user research, success metrics, requirements, and constraints. It's an *upstream* artifact: it answers "should we build this?" before any engineering happens.
+
+In the **AI-agent SDD flow** (spec-kit, Kiro, most demos), what's called a "PRD" is much closer to what we'd call a feature spec: a description of what to build, scope, acceptance criteria. It's a *downstream* artifact: it answers "given that we're building this, what exactly does it do?" The label was borrowed from product management but the artifact is doing a different job.
+
+Which one you mean determines what should be in it. I'll cover both, since you'll encounter both in the wild.
+
+#### The traditional product PRD
+
+If you genuinely mean the PM-owned document that justifies a piece of work, it typically contains:
+
+**Problem statement.** What's wrong in the world, who's affected, what's the evidence (user interviews, support tickets, telemetry, business metrics).
+
+**Goals and non-goals.** What success looks like, framed as outcomes for users or the business. Non-goals are critical — what we are deliberately *not* trying to solve here.
+
+**Success metrics.** How we'll know it worked. Specific, measurable, time-bound. "Reduce manual operational interventions in fulfilment from 15/week to under 3/week within one month of rollout."
+
+**User personas and use cases.** Who this is for, with concrete scenarios.
+
+**Requirements.** What the product must do, framed in user terms, not implementation terms. Often prioritised (must-have, should-have, nice-to-have).
+
+**Constraints.** Legal, regulatory, technical, timeline. Things that bound the solution space.
+
+**Open questions and risks.** What we don't know yet, what could go wrong.
+
+**Out of scope.** Explicitly. This is the section that survives the longest in the document's life.
+
+A traditional PRD is usually 5–15 pages, owned by a PM, written before engineering scoping happens, and used to get alignment from leadership and stakeholders. It feeds into engineering work but is not itself an engineering artifact.
+
+#### The AI-agent "PRD" (really a feature spec)
+
+If you mean what people in the SDD community call a PRD, the contents look more like:
+
+**Why this exists.** Two or three sentences of context. Not a full business case — just enough that someone reading the doc understands the motivation.
+
+**What the system does differently.** The behaviour delta, described in observable terms. This is the heart of the document.
+
+**Scope and non-scope.** What's in, what's deliberately out. The non-scope list is usually more valuable than the scope list because it preempts scope creep.
+
+**Acceptance criteria.** Specific, testable conditions for "done." Often in Given/When/Then form. Three to seven scenarios is typical.
+
+**Affected interfaces or contracts.** Which APIs, events, schemas, or data structures change, and how. In a multi-team context this is critical; in a single-team context it's often glossed over.
+
+**Open questions.** Named explicitly so the agent doesn't silently resolve them by guessing. This is the section that distinguishes a good spec from a wishlist.
+
+**Risks and rollback.** What could go wrong; how to undo it. Especially important for changes touching shared infrastructure.
+
+**(Sometimes) Implementation notes.** Light technical direction — chosen approach, libraries to use, files to touch. Often this should live in a separate implementation plan, but spec-kit-style flows tend to fold it in.
+
+This document is usually 1–3 pages, owned by a tech lead or senior engineer, written after problem framing and used as the input the agent generates a plan from.
+
+#### Which one you want depends on where you sit in the spine
+
+Earlier in our conversation we mapped out the spine: **Problem → Epic → User stories → Feature spec → Implementation plan → Tasks → Code → Verification → Release → Outcome**.
+
+A traditional product PRD lives at the **Problem and Epic** level — it's what justifies a body of work and shapes the user stories within it.
+
+The AI-agent "PRD" lives at the **Feature spec** level — it's what an individual change is described by, just under the user story.
+
+If your team uses both, they should be different documents at different levels of abstraction. If your team uses only one, be clear which job it's doing. The single biggest source of confusion in the SDD world is teams writing "PRDs" that try to do both jobs at once, which usually means they do neither well.
+
+### How `AGENTS.md` and the PRD/feature spec relate
+
+Worth being explicit about this because it's the question hiding under both of yours.
+
+`AGENTS.md` is **persistent and global**. It applies to every change in this repo, forever, until you update it. The agent loads it on every interaction.
+
+A PRD or feature spec is **transient and local**. It applies to one change. The agent loads it for that work, and once shipped, the spec becomes historical.
+
+`AGENTS.md` answers "how do we do things here?" The feature spec answers "what is this particular change doing?" If you find yourself writing repo-wide rules in a feature spec, they belong in `AGENTS.md`. If you find yourself writing feature-specific behaviour in `AGENTS.md`, it belongs in a feature spec.
+
+The clean test: would I want this to apply to the next ten changes too? If yes, it's `AGENTS.md`. If no, it's the spec.
+
+If you want, I can sketch a concrete `AGENTS.md` for one of your component types — say a backend service that exposes HTTP and consumes events — so you have a starting shape to react to rather than a blank page. Same with a feature-spec template tuned to your multi-team context. Either or both, just say which would help.
+
+---
+
+## User
+
+I am interested in the `The AI-agent "PRD"` I think. that I need to describe the integration points between services involved and contracts between them
+
+## Claude
+
+Yes — and you've just put your finger on something important. What you actually need is closer to **a vertical-slice spec** than a single-component PRD, because the thing being described isn't one service's behaviour, it's a *flow* that crosses services and contracts. Most AI-agent PRD templates fall apart here because they were designed for the single-component case. Let me show you what to actually put in this kind of document.
+
+### The shape of the document
+
+Think of it as having **three concentric layers**, narrowing from outside-in:
+
+1. **The slice as a whole** — what changes from the outside, including who's involved.
+2. **The integration points and contracts** — the boundaries between components, which is where most of the risk lives.
+3. **Per-component behaviour** — what each component does internally to play its part.
+
+Most templates you'll find online do (1) and (3) but skip (2), or do (3) only and call it a PRD. The middle layer is exactly what you need for a multi-team, multi-component slice.
+
+### What each section should contain
+
+#### Header
+
+- Status (draft / under review / approved / shipped).
+- Owner — single named person, even if multiple teams are involved. Someone has to drive the slice.
+- Stakeholders — list each affected team, with a named contact per team.
+- Linked artifacts — user story, epic, related ADRs or RFCs.
+- Last updated.
+
+#### Why
+
+Two or three sentences. The problem this exists to solve, framed as an outcome rather than a solution. If you can't write this in two sentences, the slice isn't well-understood yet — go back to refinement before continuing.
+
+#### Slice overview
+
+A one-paragraph description of the end-to-end behaviour as a user or external system would observe it. No component names yet — purely the externally visible flow.
+
+Then a **flow diagram or sequence**. This is non-negotiable for cross-component slices. A simple Mermaid sequence diagram is enough. It should show: which component initiates, which contracts are crossed, in what order, and where the slice ends. Reading the diagram should give you the shape of the change in 30 seconds.
+
+#### Components involved
+
+A table, not prose. Something like:
+
+| Component | Owner | Role in this slice | Change required |
+|---|---|---|---|
+| `web-ui` | Web team | User-facing form for batch submission | Yes — new form |
+| `orders-service` | Orders team (us) | Accepts request, validates, publishes events | Yes — splitter logic, new event |
+| `fulfilment-consumer` | Fulfilment team | Consumes events, processes batches | Yes — new event handler |
+| `analytics-warehouse` | Data Platform | Aggregates orders for reporting | No — schema unchanged |
+
+This table is doing several jobs at once: making ownership explicit, making cross-team scope visible, and surfacing the components that *don't* change (which is just as important — it's where you've decided not to ripple the change).
+
+#### Integration points and contracts
+
+This is the section your question is really about. For a vertical slice across teams, this is the most important part of the document — more important than the per-component behaviour, because the contracts are what survive after the implementation details fade.
+
+For each integration point, you want a structured block, not prose. Here's the shape:
+
+**Integration point: Orders → Fulfilment (`OrderBatchCreated` event)**
+
+- **Type:** Async event over Kafka topic `orders.batch.v1`.
+- **Producer:** `orders-service` (Orders team).
+- **Consumer(s):** `fulfilment-consumer` (Fulfilment team), `analytics-ingest` (Data Platform — read-only).
+- **Direction of change:** New contract. No existing contract to deprecate.
+- **Schema:** `schemas/orders/order-batch-created-v1.json`. (Link or path. Don't inline the full schema — link to the source of truth.)
+- **Schema highlights:** carries `order_id`, `batch_index`, `batch_count`, `line_items[]`. Backward-compatible additions allowed; breaking changes require a v2.
+- **Delivery semantics:** at-least-once. Consumers must deduplicate on `(order_id, batch_index)`.
+- **Ordering guarantees:** events for the same `order_id` are produced in `batch_index` order; partition key is `order_id` to preserve consumer-side ordering.
+- **Error handling:** publish failures retry up to 3 times with backoff; on permanent failure, the order is marked `publish_failed` and surfaces in the ops dashboard.
+- **Versioning policy:** v1 lives forever; future changes are additive in v1 or breaking in v2 with a deprecation window.
+- **Open questions:** Does Fulfilment dedupe on `(order_id, batch_index)`? Pending confirmation — see open questions section.
+
+Repeat for each integration point in the slice. A typical cross-team slice has 2–5 of these.
+
+A few principles for this section:
+
+- **Treat the contract definition itself as the source of truth, not the doc.** OpenAPI, AsyncAPI, JSON Schema, Avro — whichever you use, link to it. The doc summarises and contextualises; it doesn't redefine. Otherwise you'll have drift between the doc and the schema, and you'll discover it the hard way.
+
+- **Be explicit about delivery semantics, ordering, and idempotency for async contracts.** These are the properties partner teams need to know about and the ones that get hand-waved most often. "At-least-once with dedup on `(order_id, batch_index)`" is a contract; "we'll publish events" is not.
+
+- **For HTTP contracts, cover error responses, idempotency, and timeouts.** Not just the happy path. The error envelope matters as much as the success shape.
+
+- **Name the versioning policy.** Even one line: "additive changes within v1, breaking changes get v2." This is what tells partner teams whether they need to brace for impact.
+
+- **Mark each contract as new / changed / unchanged.** If unchanged, it shouldn't be in this section at all — but the *components* table above should still list components that consume unchanged contracts, so partner teams can see they're not affected.
+
+#### Per-component behaviour
+
+For each component that's changing, a short subsection on what it does in this slice. Behaviour, not implementation.
+
+> **`orders-service` (Orders team — us)**
+> When `POST /orders` is accepted with more than 10 line items, the service splits the line items into contiguous batches of up to 10 (preserving order) and publishes one `OrderBatchCreated` event per batch via the producer described above. Orders with 10 or fewer line items continue to publish a single `OrderCreated` event as today. Persistence is unchanged — the order is stored as a single record. Splitting is gated by the feature flag `orders.batch_publish_enabled`.
+
+Two or three of these paragraphs cover most slices. Don't write internal class names or method signatures here — that's the implementation plan's job. Stay at the "what the component does, observable from outside" level.
+
+For components owned by *other* teams, you can write this section based on what the partner team has agreed to do, but mark it clearly: "Per agreement with Fulfilment team (FULF-431); their implementation details are theirs to decide."
+
+#### Sequencing and rollout
+
+This is the section that earns its keep in cross-team work. It answers: in what order does this slice come online, and how do we avoid breakage during the transition?
+
+A typical sequencing block looks like:
+
+1. **Schema published** to the registry (Orders). No consumers yet — adding the schema is safe.
+2. **Fulfilment consumer deployed** with the new event handler, behind their internal flag, default off (Fulfilment team — FULF-431).
+3. **Orders publisher deployed** with `orders.batch_publish_enabled` flag, default off (Orders team).
+4. **Fulfilment confirms readiness** in staging end-to-end test.
+5. **Flag-on in staging** — both teams.
+6. **Flag-on in production** — coordinated, during a low-traffic window.
+7. **Monitor for 1 week**, then remove flag in next sprint.
+
+Note the explicit dependencies between teams' deployments. The classic failure mode in cross-team slices is "we shipped, they're not ready" or vice versa — the sequencing section is what prevents that. If your slice has a dependency where team A must deploy before team B, write it down.
+
+Worth thinking about explicit patterns here: feature flags, expand-contract migrations, dual-publish during transition, parallel run before cutover. The right one depends on the change. The doc should name which pattern you're using and why.
+
+#### Acceptance criteria
+
+End-to-end acceptance criteria for the slice as a whole, in Given/When/Then form. These should describe externally observable behaviour that crosses components.
+
+> **Given** a customer submits an order via the UI with 25 line items
+> **When** the order is accepted
+> **Then** the UI receives a 201 with the order ID
+> **And** three `OrderBatchCreated` events are published with `batch_index` 0, 1, 2 and `batch_count` 3
+> **And** the Fulfilment system processes all three batches without manual intervention
+> **And** the warehouse table shows one row for the order with the original 25 line items
+
+The key word is "end-to-end." These criteria span components on purpose. They're what tells you the *slice* works, not just any individual piece of it. Per-component acceptance criteria, if needed, can live inside the per-component behaviour subsections — but the headline criteria should be slice-level.
+
+#### Cross-team coordination
+
+A short section naming who needs to do what, by when. This isn't a project plan — it's a record of agreements.
+
+- Fulfilment team: subscribe to `OrderBatchCreated`, deploy consumer behind flag, ready by date X. Tracked in FULF-431.
+- Data Platform: notified for awareness; no action.
+- On-call: runbook update needed before flag-on in production.
+
+If a partner team's commitment isn't written down here, it isn't real. This section is what you point at when you're trying to work out why the slice is blocked.
+
+#### Open questions
+
+Named explicitly. Each with a state (open, blocked on whom, resolution needed by when). Things the agent must not silently decide. Examples: "Should the threshold be configurable, or hard-coded at 10?" "Does Fulfilment dedupe on `(order_id, batch_index)`?"
+
+#### Risks and rollback
+
+For each significant risk, the mitigation and the rollback path. Especially focus on partial-deployment risks ("what if our side ships and theirs doesn't?"), data-loss risks for async events, and contract-compatibility risks if you have to roll back a schema.
+
+#### Out of scope
+
+Explicit list. "Retroactive batching of historical orders." "Configurability of the threshold." "Changes to `OrderCreated` schema." This is where you tell the agent — and your teammates — what *not* to drift into.
+
+### A few principles that hold the document together
+
+**The doc is the artifact you hand to other teams.** Everything else flows from this. It must be readable by an engineer on the Fulfilment team in 5 minutes without them reading any of your code. If it isn't, it's failing its primary job.
+
+**Contracts are the most durable part.** Per-component behaviour fades into implementation; the contracts persist. Spend the most care on the integration points section — that's what survives.
+
+**Link to schemas, don't inline them.** The schema in the registry is the source of truth. The doc points at it. Inlining means drift; drift means bugs partner teams discover at runtime.
+
+**Sequencing is design, not project management.** How a slice comes online is part of the design. Treating it as "we'll figure out deploy order later" is how cross-team slices fail. Write it into the spec.
+
+**Keep per-component sections short.** If you find yourself writing detailed implementation per component, split each component's detailed plan into its own implementation-plan document and keep the slice spec focused on integration. The slice spec is about the *system*; the per-component plans are about each *piece*.
+
+**One slice, one spec, one owner.** Even if multiple teams contribute to the slice, one person owns the spec. They don't own each team's implementation — they own the *slice's coherence*. Without this, slices fragment into independent component changes that don't add up.
+
+### Length and shape
+
+A vertical-slice spec is longer than a single-component feature spec — typically 3–5 pages rather than 1. That's the cost of crossing teams; the document is doing more work. If yours is 10+ pages, the slice is probably too big and should be split. If it's under one page, you're probably underspecifying the integration points.
+
+---
+
+## User
+
+then the next step will be create the specs ? and if it is true what is written in the specs and what is in then PRD?
+
+## Claude
+
+Yes — the next step is the per-component specs, and your instinct that there's potential overlap with the PRD/slice spec is exactly right. This is one of the places where teams get muddled, so it's worth being precise about who reads what and what each document uniquely contains.
+
+### The relationship in one sentence
+
+**The slice spec describes the change as a system; the per-component specs describe each component's part in it.** The slice spec is centripetal (looks inward at the integration points that hold the slice together); the component specs are centrifugal (each looks outward from one component's perspective at what it must do).
+
+If the slice spec is the conductor's score, the component specs are the parts for each section of the orchestra. They overlap on what's being played, but each musician only reads their own part.
+
+### What lives in each
+
+#### What lives in the slice spec (PRD) only
+
+These are things that only make sense at the slice level — they describe the *whole* and have no natural home in any single component's spec.
+
+- **Why the slice exists.** The end-to-end motivation. A component spec doesn't need to re-explain why the change is happening across the system.
+- **End-to-end flow / sequence diagram.** The picture that shows how the components compose. Each component owns its piece of the flow but not the flow itself.
+- **Components-involved table.** The map of who's doing what. Lives only at the slice level.
+- **Cross-team coordination and sequencing.** Deploy order, partner-team commitments, rollout plan. These are properties of the *slice*, not of any component.
+- **End-to-end acceptance criteria.** Criteria that span components. ("Order goes in via UI; three batch events emitted; Fulfilment processes them without intervention.") No single component can verify these alone.
+- **Slice-level open questions.** Questions that affect multiple components or partner teams — e.g. "Does Fulfilment dedupe on `(order_id, batch_index)`?" — even though the answer ends up in a component spec.
+- **Slice-level out-of-scope.** Things explicitly not being changed across the system.
+
+#### What lives in a per-component spec only
+
+These are things that only make sense from one component's point of view, and would be noise in the slice spec.
+
+- **Internal behaviour.** What this component does inside its own boundary to play its role: state transitions, persistence changes, validation logic, internal guards, feature flags scoped to this service.
+- **Internal interfaces.** New modules, new abstractions, new internal APIs between layers of *this* component. Doesn't concern other teams.
+- **Component-local acceptance criteria.** Tests that exercise this component in isolation — typically with the contracts mocked. "Given a 25-item order is accepted, when the publisher runs, then three events are emitted with the right batch indices." This is verifiable inside `orders-service` alone, against the published contract.
+- **Component-specific implementation choices.** Library choices, data structures, where the splitter logic lives in the codebase, retry strategy, metric names. The kind of detail that the agent needs but that another team neither cares about nor should depend on.
+- **Component-local risks and rollback.** "If the publisher fails partway through a batched order, we don't mark the order as published, and retry the whole operation." That's an internal property of `orders-service`; Fulfilment doesn't need to know it as long as the contract guarantees hold.
+- **Component-local tests and verification approach.** Unit tests, integration tests against a real database, contract tests against the schema. The test pyramid for *this* component.
+
+#### What appears in both — but in different forms
+
+This is where the muddle happens. A few items legitimately appear in both, but with different framing:
+
+**Contracts.** The slice spec describes the contract as a *negotiated boundary* between components: who produces, who consumes, semantics, versioning, ownership. The component spec describes how *this* component implements its side of the contract: which class publishes, how the message is built, how failures are handled internally. Both reference the same source-of-truth schema; neither inlines it.
+
+**Acceptance criteria.** The slice spec has end-to-end criteria that cross components ("UI submits → Fulfilment processes"). The component spec has component-local criteria that exercise just this component against its contracts ("publisher emits N events given M-item order"). Same intent, different scope.
+
+**Open questions and risks.** Slice-level vs. component-local. "Does Fulfilment dedupe?" is slice-level. "How do we handle Postgres connection exhaustion under burst load?" is component-local.
+
+**Out of scope.** Slice-level non-goals ("no retroactive batching") vs. component-level non-goals ("not changing the persistence layer in this service").
+
+The principle: **the same topic can appear in both documents, but at a different altitude.** If you find yourself copy-pasting a section from one to the other, you're collapsing two altitudes into one and you'll have a maintenance problem the first time something changes.
+
+### A concrete walkthrough
+
+Take the order-batching slice. After the slice spec is written, the per-component specs that fall out of it look something like this — I'll just show what goes in each, briefly.
+
+**`orders-service` component spec (your team writes this):**
+
+- Why this component is changing — one sentence pointing back at the slice spec.
+- New internal behaviour: line-item splitter, publish-path change, feature-flag gating.
+- New internal modules / classes (at the level of "what's added," not implementation detail).
+- How this component implements its side of the `OrderBatchCreated` contract: producer wiring, partition key, retry strategy, idempotency approach.
+- Component-local acceptance criteria: unit tests for the splitter, contract test for the publisher against the registry, integration test with an embedded broker.
+- Component-local risks: partial-publish handling, flag misconfiguration, schema-registry availability.
+- Component-local out-of-scope: persistence, request validation, the `OrderCreated` path for small orders.
+- Rollout for this component specifically: flag default, monitoring, dashboards.
+
+**`fulfilment-consumer` component spec (Fulfilment team writes this — not you):**
+
+- Why this component is changing — one sentence pointing back at the slice spec.
+- New internal behaviour: handler for `OrderBatchCreated`, deduplication strategy, downstream warehouse calls per batch.
+- How this component implements its side of the contract: subscription, deserialisation, dedup key, error handling.
+- Component-local acceptance criteria for their handler.
+- Their internal risks, rollout, monitoring.
+
+Notice what each spec omits: neither component spec restates the why, the end-to-end flow, the cross-team sequencing, or the slice-level acceptance criteria. Those live in the slice spec only. And the slice spec, in turn, doesn't talk about the splitter's class structure or Fulfilment's dedup key — those live in their respective component specs only.
+
+### A test you can apply
+
+When you're not sure whether something belongs in the slice spec or a component spec, ask:
+
+**"Does this concern someone outside the component that owns it?"**
+
+- If yes → it's slice-level. The slice spec owns it.
+- If no → it's component-level. That component's spec owns it.
+
+The contract itself is slice-level (multiple components care). The splitter's class structure is component-level (only `orders-service` cares). The decision to split at publish time rather than persist time is slice-level (it determines what events partner teams see). The choice of which library is used for the publisher is component-level (no one outside `orders-service` cares).
+
+This test usually resolves 90% of "where does this go?" arguments.
+
+### Practical workflow
+
+The order in which these documents come into existence matters:
+
+1. **Slice spec drafted first**, by the slice owner (typically the tech lead of the team most central to the slice — often you, in this scenario). It's drafted *before* any component spec, because the contracts and integration points have to be settled before each component can plan its own work.
+2. **Slice spec reviewed cross-team.** All affected teams' tech leads sign off, especially on contracts and sequencing. This is the high-stakes meeting.
+3. **Per-component specs written in parallel** by each owning team. Each team writes their own, against the agreed slice spec. Your team writes `orders-service`'s; Fulfilment writes `fulfilment-consumer`'s.
+4. **Per-component specs feed into per-component implementation plans**, which is where the agent enters the flow most heavily — generating the plan from the component spec, decomposing into tasks, executing.
+5. **The slice spec is updated** if any per-component spec surfaces a change to the slice's integration points or sequencing. (This should be rare. If it happens often, the slice spec wasn't sharp enough at step 2.)
+
+A useful constraint: **the slice spec should stop being edited once per-component work begins.** Treat it as frozen. If something needs to change, update the slice spec deliberately, and re-circulate it to affected teams. This discipline is what stops the slice from quietly fragmenting.
+
+### What this means for the agent
+
+The agent's role is different at each level.
+
+For the **slice spec**, the agent is mostly an editor and challenger — useful for drafting, surfacing missing sections, generating sequence diagrams, sanity-checking acceptance criteria. It should *not* generate the slice spec from a one-line conversation; that's where the AI-agent demos go wrong. The slice spec is a human-shaped artifact informed by partner-team conversations the agent wasn't in.
+
+For the **component spec**, the agent can do more — it has the slice spec as context, the AGENTS.md as constitution, and the codebase to reason about. It can draft a strong first version of the component spec from the slice spec plus the repo, which a human then refines.
+
+For the **implementation plan and tasks**, the agent is in its element. Slice spec + component spec + AGENTS.md is the context bundle the agent needs to generate a sensible plan and execute it.
+
+So the layering ends up being: **slice spec → per-component specs → per-component implementation plans → tasks → code.** The agent's involvement increases as you move right. Cross-team negotiation happens at the leftmost layer and stays human; agent-driven execution happens at the rightmost layers and accelerates over time as your `AGENTS.md` and templates mature.
+
+---
+
+## User
+
+if you have to develop a new feature. What would you do? what conversations would you have with Claude Code, what skills would you think that you could develop? how it would be your process? forget SDD. lets try to create a framework or workflow.
+
+## Claude
+
+Good — dropping SDD and building from first principles is exactly the right move. SDD is one possible answer; the actual question is "given coding agents exist, what's the most effective way to develop a feature?" Let me describe what I'd actually do, and why each step earns its place.
+
+I'll assume the feature is non-trivial — a few days to a few weeks of work, possibly cross-component, possibly cross-team. Trivial bug fixes don't need a framework; you just do them.
+
+### The shape of the workflow
+
+The workflow has five phases, each with a different mode of working with the agent. I'll describe each phase, what I'd actually do in it, and what conversation I'd be having with Claude Code at that point. Then I'll talk about the skills that compound over time.
+
+#### Phase 1: Understand before specifying
+
+This is the phase most engineers — and almost all AI-agent demos — skip. The temptation is to start with "build me X." That works for greenfield. For anything else, it's the most expensive shortcut you can take.
+
+Before I write any spec or generate any code, I want to understand three things: the problem, the existing system as it relates to the problem, and the people whose work this touches. The agent helps with the second one; the first and third are mostly human.
+
+What I'd actually do:
+
+- Talk to whoever raised the problem. Not "what feature do you want," but "what's broken or missing, and how do you know?" If there's no clear answer, the feature isn't ready to build.
+- Identify the partner teams whose components or contracts the feature might touch. Send them a heads-up before you've made any commitments. This is cheap and prevents most cross-team pain later.
+- Use the agent to *map the existing system*. Not to write code, not even to plan — to explore.
+
+The conversation I'd have with Claude Code at this stage is exploratory:
+
+> "I'm thinking about adding behaviour X. Before I plan anything, help me understand what's in the codebase that's relevant. Where does the order-creation flow live today? What's the current event-publishing path? Who reads the `OrderCreated` event — search the repo for consumers and tell me what you find. Don't propose changes yet."
+
+The output isn't code. It's a mental model. The agent is genuinely good at this — it can read 30 files faster than you can — and it's the part where it adds the most value relative to what you'd do alone. Resist the urge to skip it. Two hours of exploration here saves two days of rework later.
+
+I'd also ask the agent to surface things I might be missing:
+
+> "Based on what you've read, what assumptions am I making that might not hold? What components or teams might be affected that I haven't mentioned? Push back on me."
+
+Most engineers don't ask agents to challenge them. They should. The agent will often spot a consumer or a side-effect you'd missed. Sometimes its concerns are wrong; that's fine — you've still surfaced them and dismissed them deliberately rather than by accident.
+
+#### Phase 2: Decide what's actually changing
+
+Now I have a problem and a mental model. The next step is deciding what to change in the system, *before* deciding how. This is the step that prevents most rework.
+
+What I'd actually do:
+
+- Write down the change as a behaviour delta: "after this work, the system does X instead of Y." Two paragraphs. This is for me, not for the agent.
+- Identify the boundaries this change crosses: which components, which contracts, which teams. If any of those involve people I haven't talked to, talk to them now.
+- Decide what's explicitly out of scope. This is the single most useful sentence in any spec; it's where the feature stays bounded.
+
+The conversation with Claude Code in this phase is more critical and less generative:
+
+> "Here's the behaviour I want. Read it back to me in your own words and tell me what's ambiguous. What questions would you need answered before you could plan this? What contracts does this touch?"
+
+This is the agent as a precision tool. You're using it to find the holes in your own thinking. If the agent comes back with five clarifying questions and you can't answer two of them, you're not ready to plan yet — go back to phase 1.
+
+If the change crosses contracts owned by other teams, this is when I'd negotiate them. With humans. Not with the agent. The agent can help me draft the proposal, but the conversation is mine. The output of that conversation — what the contract will look like, who owns it, when each side will deploy — gets written down and feeds the next phase.
+
+By the end of phase 2 I have something written down: the behaviour delta, the contracts affected, what's in and out of scope, the agreements I've made with other teams. Whether you call this a feature spec, a slice spec, a PRD, or a napkin doesn't matter. It exists, it's specific, and other humans have signed off on the parts that affect them.
+
+#### Phase 3: Plan with the agent
+
+Now the agent is in its element. With a clear behaviour change in hand, the agent can generate a strong implementation plan — and this is where the time savings start to compound.
+
+What I'd actually do:
+
+- Hand the agent the behaviour write-up plus pointers to the relevant parts of the codebase. Ask it to propose a plan.
+- Read the plan critically. Push back. Iterate on the plan, not on the code.
+- Once the plan is sound, decompose it into tasks small enough that each one is reviewable in isolation.
+
+The conversation here is iterative:
+
+> "Given the behaviour I described and the code you explored earlier, propose an implementation plan. Identify the files you'd touch, the order you'd touch them in, where the new logic goes, and what tests you'd write. Flag anything where you'd need to make a judgement call and tell me what the alternatives are."
+
+Then:
+
+> "I disagree with putting the splitter in the publisher path — it'll make the publisher harder to test in isolation. What if we put it one layer up, in the application service? Walk me through the tradeoffs."
+
+The skill being developed here is **negotiating with the agent over design**. Not accepting its first proposal; not overriding it without engagement; treating it as a junior engineer who's read the codebase carefully and has opinions worth interrogating. Sometimes you change your mind, sometimes it changes its plan, sometimes you both end up somewhere neither started.
+
+A specific habit worth building: **make the agent justify its choices**. When it proposes putting something in a particular file, ask why. When it picks a library, ask what it considered. The justifications are usually fine; occasionally they reveal a misunderstanding you can correct before code is written.
+
+End of phase 3 I have a plan I trust, decomposed into reviewable tasks, with the design choices justified.
+
+#### Phase 4: Implement, in tight loops
+
+The agent writes code. You review it. The art is in the loop length.
+
+What I'd actually do:
+
+- Have the agent implement one task at a time, not the whole feature. Even if it could do the whole thing in one shot.
+- Review each task as if it were a PR from a junior engineer — but with different failure modes in mind. The agent's failures aren't "missed an edge case"; they're "confidently invented an API," "drifted from a convention," "produced code that passes its own tests but violates an unwritten rule."
+- Run the tests yourself, not just the ones the agent wrote. Especially the ones that exercise the boundary this feature touches.
+- If something feels off, stop and investigate before continuing. Don't accumulate debt.
+
+The conversation in this phase is concrete and tight:
+
+> "Implement task 1 from the plan. Use the existing `EventPublisher` interface; don't introduce a new abstraction. After you're done, run the tests in `tests/orders/` and tell me what passes and what fails."
+
+And after each task:
+
+> "Show me the diff. Walk me through the changes. Are there any places where you took a shortcut or made a decision that wasn't in the plan?"
+
+That last question is a habit worth forming. Agents make small unprincipled decisions all the time — picking a variable name, adding a helper, slightly restructuring a file. Most are fine. Some matter. Asking explicitly surfaces them.
+
+The skill being developed here is **fast, high-trust review**. You're not reading every line as if you wrote it. You're scanning for the patterns the agent gets wrong in your codebase specifically, which you've learned over time. New convention drift; invented APIs; tests that test the mock rather than the behaviour; subtle changes to error handling. Your eye gets sharper as you do this more.
+
+One more thing: **commit frequently**. Each task, each meaningful chunk. If the agent goes off the rails, you want to roll back to a known-good state, not lose half a day of work. Treat the agent like a force of nature you partly control; design your workflow to be resilient to it.
+
+#### Phase 5: Verify the change actually does what you said
+
+This is the second most-skipped phase, after phase 1. Tests passing means the code does what the tests check. It doesn't mean the change does what you wanted.
+
+What I'd actually do:
+
+- Manually exercise the feature end-to-end against the real environment (staging, dev cluster, whatever's most realistic). Especially the cross-component path if it's a vertical slice.
+- Look at the real outputs — the events being emitted, the log lines, the metrics, the data in the database. Compare to what the spec said should happen.
+- Confirm with the partner teams that what they're consuming matches what they expected.
+- Watch the feature in production for a few days after release. Telemetry, error rates, support tickets.
+
+The conversation here is partly with the agent, partly with the system:
+
+> "Help me write a small script that produces a 25-item order against staging and tails the events emitted to the broker. I want to see them with my own eyes."
+
+And:
+
+> "Compare the events I just captured against the schema in `schemas/orders/order-batch-created-v1.json`. Are there any fields missing, any types off, anything that wouldn't deserialise cleanly?"
+
+The skill being developed here is **trusting the agent without trusting the agent**. The agent is fast and usually right; production reality is the only thing that confirms it actually worked.
+
+After release, close the loop honestly. Did it solve the problem from phase 1? Did the metric move? If not, why not? The PM cares about this; you should too. It's also where you find out which assumptions in phase 1 turned out to be wrong, which you then take back into the next feature.
+
+### The skills that compound over time
+
+The phases above describe a single feature. The interesting question is: what makes you better at this over many features?
+
+**Pattern recognition for agent failure modes in your codebase.** Every codebase has a few things the agent reliably gets wrong: a convention it doesn't pick up, a layer it tends to skip, a kind of test it tends to write badly. After 5–10 features, you know what they are. You start scanning for them automatically in review. Capture them in `AGENTS.md` so the next person — and the agent — gets the benefit.
+
+**Knowing when to take over.** The agent is excellent at most things and bad at a few. Architectural decisions that depend on tacit knowledge of how the system has evolved; decisions where the right answer is "don't do this at all"; subtle correctness in concurrency or distributed-system edge cases. Learn where your agent's blind spots are and switch to manual mode there. Don't fight it; route around it.
+
+**Prompting precision.** Vague prompts produce vague output. "Implement the batching feature" is a worse prompt than "Implement task 1: add the `BatchSplitter` class in `domain/orders/`, with `split(items: List[LineItem]) -> List[List[LineItem]]`, splitting into contiguous batches of up to 10, preserving order. Tests in the same package, using the existing `LineItemFactory`." This isn't pedantry; it's the difference between one-shot success and three rounds of cleanup.
+
+**Reviewing fast.** You'll review more code than you ever have. Develop a rhythm: scan the diff shape first (which files, how many lines), then the public-interface changes, then the test changes, then the actual logic. Most issues surface in the first three; the last one only matters when something looks off in the others.
+
+**Asking the agent to challenge you.** The agent will agree with almost anything if you let it. Build the habit of asking "what's wrong with this approach?" or "what would you do differently?" or "tell me what I'm not seeing." This is the single most useful prompt pattern I've found, and almost nobody uses it.
+
+**Knowing what *not* to delegate.** The decision of what to build, the conversations with partner teams, the judgement of whether something is worth shipping — these stay yours. The agent's role is to execute and to challenge, not to decide. Teams that delegate decisions to agents end up with codebases that are technically excellent and strategically incoherent.
+
+**Closing loops.** This is the meta-skill. Did the feature work? Did the prompt produce what you wanted? Did the convention you added to `AGENTS.md` actually stick? If you don't check, you don't improve. If you do, you compound. After a year, the gap between someone who closes loops and someone who doesn't is enormous.
+
+### What this is and isn't
+
+This isn't SDD. It isn't agile. It isn't anti-either of those. It's a workflow built around the actual capabilities and failure modes of coding agents, with the human doing the things humans are uniquely good at and the agent doing the things it's uniquely fast at.
+
+The shape, if you want a one-line summary: **understand → decide → plan with the agent → execute in tight loops → verify in reality.**
+
+The phases that look like overhead are the ones that protect everything downstream. Skipping phase 1 means building the wrong thing fast. Skipping phase 2 means building the right thing in the wrong way. Skipping phase 5 means never knowing if you got it right.
+
+Phases 3 and 4 are where the agent earns its keep. Everything else is the human's job, and trying to delegate it to the agent is how teams end up with a lot of generated code and no idea whether it's solving anything.
+
+If you wanted to make this a team practice rather than a personal one, the move is to formalise the artifacts each phase produces — exploration notes, behaviour write-up, plan, task list, verification report — and to evolve a per-team `AGENTS.md` that captures what you've learned about your codebase. But you don't need that on day one. Start with the workflow as a personal practice, learn what works, then codify.
+
+Honestly, this is the workflow I'd recommend even setting aside the multi-team brownfield context. The brownfield context just makes phases 1, 2, and 5 even more important, because there's more existing system to understand, more boundaries to negotiate, and more places where reality can diverge from your model. The fundamentals are the same.
+
+---
+
+## User
+
+i am assuming that we have a first document that explains the feature and the technical implications, the components involved and contracts introduced and way of communicating (sync vs async), acceptance criteria and user stories.
+
+The next document will be one per user story broken down in tasks. I believe in this part deeper conversations will have to be taken. like in the planning session in agile methodology.
+
+next step is the development cycle where tasks that are in parallel will be executed in parallel and those sequential will be done in sequential mode.
+
+does it make sense?
+
+## Claude
+
+Yes — that makes sense, and it's a clean shape. You've essentially landed on a three-layer model that mirrors how good engineering teams actually work, just with the agent slotted in at the layers where it earns its keep. Let me reflect it back, sharpen a few edges, and flag the parts where I'd push you to be more deliberate.
+
+### The three layers, as you've described them
+
+**Layer 1: Feature document.** End-to-end picture. Why, what changes, components involved, contracts and their semantics (sync vs async), acceptance criteria, user stories. One document per feature.
+
+**Layer 2: Per-story breakdown.** One document per user story, decomposed into tasks. This is where the deeper planning conversations happen — both with humans (the agile planning session you're alluding to) and with the agent.
+
+**Layer 3: Execution.** Tasks executed, with parallelism where dependencies allow, sequential where they don't.
+
+This is sound. The key insight you've already had — and it's the one most teams miss — is that **the planning conversation at layer 2 is where the real work happens**. Layer 1 sets the boundaries; layer 3 is execution; layer 2 is where you turn intent into something actionable. If layer 2 is rushed, layer 3 produces fast but wrong code.
+
+### Sharpening the layers
+
+#### Layer 1 is shared; layers 2 and 3 are per-team
+
+Worth being explicit about this because it has real consequences. The feature document is the artifact that crosses team boundaries — it's what you and the partner teams agree on. Each team then has its own layer 2 and layer 3 for their part of the feature. Your team writes per-story breakdowns for the stories your components own; Fulfilment writes theirs.
+
+This matters because:
+
+- **Layer 1 should freeze before layer 2 starts.** If teams are still negotiating contracts while each is breaking down stories, you'll end up with stories that contradict each other. Agree the feature document, then go to per-team breakdown.
+- **Layer 2 documents don't need cross-team review.** Your per-story breakdown for `orders-service` is your team's business. Fulfilment doesn't need to read it. This is liberating — it means layer 2 can be fast and informal in a way layer 1 can't.
+
+#### The user story is the unit of value, not the unit of execution
+
+A user story should represent **a slice of value that can be delivered, demoed, and reasoned about independently**. "Implement the splitter" isn't a story; it's a task. "Large orders are split into batches when published" is a story — it has observable behaviour, acceptance criteria, and could in principle ship on its own (behind a flag) without the rest of the feature being done.
+
+That distinction matters because tasks within a story are usually tightly coupled and often need to ship together; stories within a feature can sometimes ship independently and in different orders. If your stories are really tasks in disguise, you lose that flexibility.
+
+A test: if you can't write a Given/When/Then for it that a partner team or PM would care about, it's a task, not a story.
+
+#### The per-story breakdown is doing two jobs at once — keep them separate
+
+You said "one document per user story broken down in tasks," and that's right, but it's worth recognising that this document is doing two distinct things:
+
+**(a) Refining the story.** Clarifying acceptance criteria, surfacing edge cases, identifying open questions, deciding on the approach. This is design work. It's where the conversation happens.
+
+**(b) Decomposing into tasks.** Listing the executable units, identifying dependencies, sequencing them. This is planning work.
+
+These are different activities and tend to happen at different moments. Refinement is exploratory and needs the agent (and humans) in challenge mode. Task decomposition is mechanical once the design is clear.
+
+I'd suggest the per-story document has both, but visibly separated:
+
+- **Approach** (the design decisions, the chosen path, the alternatives considered, the open questions resolved)
+- **Tasks** (the executable list, with dependencies marked)
+
+The reason to separate them: when you come back to this document mid-implementation because something didn't work, you want to know whether the *approach* is wrong or just a *task* needs adjusting. Conflating them makes that hard to tell.
+
+#### The deeper conversations you mentioned — make them deliberate
+
+The conversation at layer 2, with the agent, is fundamentally different from the one at layer 1. At layer 1 the agent is mostly an editor and explorer. At layer 2 the agent is a design partner. The conversation looks like:
+
+> "Here's the story. Here's the relevant code I want you to read. Propose two or three different approaches to implementing this, and tell me the tradeoffs of each. Don't pick one yet."
+
+Then:
+
+> "I'm leaning toward approach B. Push back on that — what's the strongest case for A or C? What am I not seeing?"
+
+Then once an approach is settled:
+
+> "Given approach B, what are the tasks? Identify which can run in parallel and which depend on others. For each task, tell me what 'done' looks like — what files change, what tests exist, what the agent needs to know to do it."
+
+This is the conversation that produces a high-quality task list. Skipping the first two prompts and going straight to "break this story into tasks" is the most common failure mode. The agent will produce *a* task list — usually plausible, often subtly wrong because it didn't consider alternatives.
+
+Being deliberate about this conversation is the highest-leverage skill at layer 2.
+
+#### Parallelism at layer 3 is a design decision, not just a property of tasks
+
+Parallelism is something you design for, not something you discover. When breaking down a story into tasks, you can usually choose:
+
+- A decomposition where most tasks are sequential because each builds on the last (slow but easy to review).
+- A decomposition where most tasks are parallel because you've defined clean interfaces between them upfront (fast but requires more design effort and discipline).
+
+A rule of thumb that's served me well: **parallelise across natural boundaries, sequence within them**. If your story has a frontend piece, a backend piece, and a schema piece, those can run in parallel because they meet at well-defined contracts. But the three tasks that all modify the same file should run in sequence.
+
+The task list at layer 2 should make these dependencies explicit. "Task 4 depends on task 2; tasks 5 and 6 are independent and can run in parallel." This isn't bureaucracy; it's the difference between a smooth execution phase and one where the agent (or you) keeps stepping on its own toes.
+
+### What's missing from your three-layer picture
+
+Two things it doesn't yet name explicitly that I'd add:
+
+#### A discovery / understanding step before layer 1
+
+Before you can write the feature document, somebody — probably you — has to understand the problem and the existing system well enough to write it. This is the phase where the agent helps you map the codebase, identify affected components, and surface the partner teams who need to be in the conversation. It's not a document; it's a phase. Skipping it produces feature documents that look complete but are quietly wrong.
+
+#### A verification / closing step after layer 3
+
+After tasks are done and code is merged, two things need to happen:
+
+- **Verify the feature actually does what layer 1 said it would**, end-to-end, in something close to a real environment. Tests passing isn't enough; the slice has to demonstrably work across the components and contracts you described.
+- **Close the loop on the original problem.** Did this solve what we set out to solve? Telemetry, partner-team confirmation, user feedback. This is what tells you the feature document was right, not just that the code matched it.
+
+### The full shape, with your model intact
+
+**Discover** (a phase, not a document) — understand the problem and the system, talk to partner teams.
+
+**Layer 1: Feature document** — shared across teams, frozen before layer 2 starts. Why, behaviour delta, components, contracts, sequencing, end-to-end acceptance criteria, user stories.
+
+**Layer 2: Per-story breakdown** (one per story, per team) — approach + open questions + decomposed tasks with dependencies marked. Where the deep design conversations with the agent happen.
+
+**Layer 3: Execution** — tasks run in parallel where independent, sequential where dependent. Tight review loops, frequent commits, agent in execution mode.
+
+**Verify** (a phase) — end-to-end check that the feature works as the document said, in a real environment.
+
+**Close the loop** — did it solve the original problem? What did we learn?
+
+That's a coherent framework and it works. It maps onto agile cleanly (discover ≈ refinement; layer 1 ≈ shaping; layer 2 ≈ planning; layer 3 ≈ implementation; verify ≈ release; close ≈ retro), and it accommodates the agent at the points where it adds the most leverage.
+
+### Two things to be deliberate about
+
+**Layer 1 freezes before layer 2 starts.** The temptation to keep editing the feature document while stories are being broken down is huge. Resist it. If layer 1 needs to change after layer 2 has started, treat it as a re-plan: stop layer 2 work, update layer 1, re-circulate, then resume.
+
+**Layer 2 is where the design happens.** Layer 1 captures *what*; layer 3 produces *code*; layer 2 is where you decide *how*. The deeper the conversation at layer 2 — with the agent, with your team — the smoother layer 3 goes.
+
+---
+
+## User
+
+I want you to show me in each phase, which artefact/document is created and sections of each
+
+## Claude
+
+Good — let me lay this out concretely. For each phase, I'll show what document (if any) is produced, who owns it, and what sections it contains.
+
+A note before we start: not every phase produces a long document. Some produce short notes; one produces no document at all (just code and commits). I'll be honest about which is which, because over-documenting kills the workflow as surely as under-documenting does.
+
+---
+
+### Phase 1: Discover
+
+**Document produced:** Discovery notes
+**Owner:** You (the engineer driving the feature)
+**Length:** Half a page to two pages
+**Lifespan:** Disposable — feeds into Layer 1 then can be archived
+**Audience:** Yourself, possibly your tech lead
+
+This isn't a formal artifact. It's your working memory, written down so it doesn't evaporate.
+
+**Sections:**
+
+- **Problem statement** — one paragraph. What's wrong, who's affected, how you know.
+- **Existing system map** — a short tour of what's relevant. Which components handle this today, which contracts are in play, where the relevant code lives. Often a few bullet points with file paths and component names.
+- **Affected components and teams** — your best current guess at who'll need to be involved. Marked with confidence ("definitely," "probably," "maybe").
+- **Open questions for partner teams** — things you need to ask before writing Layer 1. Each with the team to ask and what you need to know.
+- **Assumptions you're making** — explicitly. The ones that, if wrong, change the shape of the feature.
+- **Risks and unknowns** — early signals of where this could go sideways.
+
+The agent helps heavily here — it can explore the codebase, find consumers of an event, surface dependencies — but the synthesis is yours.
+
+---
+
+### Phase 2: Layer 1 — Feature document
+
+**Document produced:** Feature document (a.k.a. slice spec, vertical-slice spec, "PRD" in some communities)
+**Owner:** Tech lead or designated engineer driving the feature
+**Length:** 3–5 pages for a cross-team slice; 1–2 pages for a single-component feature
+**Lifespan:** Lives until the feature ships; archived afterwards as historical reference
+**Audience:** Your team, partner teams, PM, anyone whose work this touches
+
+This is the shared artifact. It crosses team boundaries. It freezes before Layer 2 starts.
+
+**Sections:**
+
+- **Header** — status (draft / review / approved / shipped), owner (single named person), stakeholders (named contacts per affected team), linked artifacts (epic, related ADRs), last updated.
+- **Why** — two or three sentences. The problem framed as an outcome, not a solution.
+- **Slice overview** — one paragraph describing the end-to-end behaviour as a user or external system would observe it. No component names yet.
+- **Flow diagram** — sequence diagram (Mermaid is fine) showing how the components compose end-to-end. Non-negotiable for cross-component features.
+- **Components involved** — table: component, owner, role in this feature, change required (yes/no). Includes components that *don't* change.
+- **Integration points and contracts** — for each contract: type (HTTP/event/etc.), producer, consumer(s), direction of change (new/changed/unchanged), link to schema (don't inline), delivery semantics, ordering, error handling, versioning policy. This is the most important section.
+- **Per-component behaviour** — one short subsection per changing component. What it does in this feature, observable from outside its boundary.
+- **Sequencing and rollout** — explicit ordering: who deploys first, who flag-flips first, who confirms readiness. The deployment sequence is part of the design, not an afterthought.
+- **End-to-end acceptance criteria** — Given/When/Then scenarios that span components.
+- **Cross-team coordination** — a short list: which team is committing to what, by when, tracked where. If a team's commitment isn't here, it isn't real.
+- **User stories** — the slice decomposed into user-visible increments. Each with its own acceptance criteria. These are what feed Layer 2.
+- **Open questions** — explicitly named, with state (open / blocked on whom / resolution by when).
+- **Risks and rollback** — for each significant risk, mitigation and rollback path. Especially partial-deployment risks for cross-team slices.
+- **Out of scope** — explicit list. The non-scope items are the most-read part of this document six months later.
+
+A note on user stories within this document: keep them light at this layer — title, one-line description, and acceptance criteria. The deeper breakdown happens in Layer 2.
+
+---
+
+### Phase 3: Layer 2 — Per-story breakdown
+
+**Document produced:** Per-story breakdown (one per user story)
+**Owner:** Engineer who will lead implementation of that story
+**Length:** 1–2 pages
+**Lifespan:** Lives during implementation; archived after merge
+**Audience:** The implementing engineer(s), reviewers, the agent
+
+This is your team's document. It does not need cross-team review.
+
+**Sections:**
+
+- **Header** — story title, link to the feature document, link to the user story in your tracker, owner, status.
+- **Story summary** — one paragraph restating the story in your own words.
+- **Acceptance criteria** — the criteria from the feature document, copied here for context. Often refined or made more specific now that you're closer to implementation.
+- **Approach** — the design section. The chosen way to implement this story, with brief justification. Two or three sentences saying what's being done at the architectural level. Where in the code this lives. What patterns from `AGENTS.md` apply.
+- **Alternatives considered** — short. The two or three approaches you considered and rejected, with one-line reasoning.
+- **Open questions resolved** — questions that were open in the feature document and have been answered before tasks begin. Each with the answer and where it came from.
+- **Open questions remaining** — anything the agent must not silently decide while implementing.
+- **Tasks** — the executable list. Each task has: a title, a one-line description of what's being done, the files expected to be touched, the test(s) that prove it works, and dependencies on other tasks.
+- **Parallelism map** — a simple visual or list showing which tasks can run in parallel and which must be sequential.
+- **Definition of done for this story** — the specific checks that say this story (not the whole feature) is complete.
+
+The conversation that produces this document is different from the one that produces Layer 1. At Layer 2, the agent is a design partner — proposing approaches, identifying tradeoffs, decomposing into tasks. The discipline is to *resist* the agent's first task list and instead negotiate the approach first, then derive tasks from the agreed approach.
+
+---
+
+### Phase 4: Layer 3 — Execution
+
+**Document produced:** None — the artifacts are commits, PRs, and tests
+**Owner:** Engineer (with agent assistance)
+**Lifespan:** Lives forever in version control history
+**Audience:** Reviewers, future maintainers, the agent in subsequent sessions
+
+This phase is deliberately documentation-light. The work product *is* the code, the tests, and the PR descriptions.
+
+**What's produced:**
+
+- **Code commits** — small, frequent, each with a clear message that references the task.
+- **PRs** — one per task or small group of tightly-coupled tasks. PR descriptions should link back to the per-story breakdown and the feature document.
+- **PR description** — what the PR does, which task(s) from the per-story breakdown it implements, what was tested, what reviewers should pay attention to, anything notable that diverged from the plan.
+- **Tests** — at the levels your `AGENTS.md` says to test. Unit, integration, contract.
+- **ADRs (occasionally)** — when a non-trivial decision is made during implementation that should outlive the feature.
+
+**ADR sections (when one is produced):**
+
+- **Title** — short, action-oriented ("Use Postgres advisory locks instead of Redis-based locking").
+- **Status** — proposed / accepted / superseded.
+- **Context** — what's the situation that requires a decision.
+- **Decision** — what was decided.
+- **Alternatives considered** — what else was on the table and why it lost.
+- **Consequences** — what changes as a result, including downsides.
+
+ADRs are immutable. Once written and accepted, they don't get edited; they get superseded by newer ADRs.
+
+The principle for Layer 3 is **the code is the document**.
+
+---
+
+### Phase 5: Verify
+
+**Document produced:** Verification report (lightweight)
+**Owner:** Engineer who led implementation
+**Length:** Half a page
+**Lifespan:** Attached to the story or feature; useful for closing the loop
+**Audience:** Tech lead, PM, partner teams
+
+**Sections:**
+
+- **What was verified** — brief description of the end-to-end test performed.
+- **Acceptance criteria results** — each end-to-end criterion from the feature document, with pass/fail/partial.
+- **Cross-component verification** — confirmation that partner teams' components received what they expected.
+- **Data and observability check** — what the events / logs / metrics actually look like in the test, with a sanity check against the schema or the spec.
+- **Issues found** — anything that surfaced during verification that didn't show in tests. With a disposition (fix before release / fix in follow-up / accepted).
+- **Go / no-go recommendation** — your judgement.
+
+This document is what closes the implementation loop. It's the artifact that says "the code does what the feature document said it would" — which is a different claim from "the tests pass."
+
+---
+
+### Phase 6: Close the loop
+
+**Document produced:** Outcome note + retro note
+**Owner:** PM (outcome) and team (retro)
+**Length:** Half a page each
+**Lifespan:** Attached to the feature; informs future planning
+**Audience:** Stakeholders, the team itself
+
+**Outcome note (owned by PM):**
+
+- **What we shipped** — one or two sentences.
+- **Original problem and predicted outcome** — restated from the feature document, so we can compare.
+- **Actual outcome** — what the metrics, telemetry, and stakeholder feedback say. Honestly.
+- **Gaps between predicted and actual** — and best guess at why.
+- **Follow-up work** — anything the actual outcome suggests we should do next.
+
+**Retro note (owned by the team):**
+
+- **What worked** — one or two things, specifically. Not platitudes.
+- **What didn't** — one or two things. Specifically.
+- **One change for next time** — a single, concrete, owned action item. Not a list. One.
+- **Updates to `AGENTS.md` or templates** — if anything from this feature surfaced a pattern worth encoding, what gets added or changed.
+
+The retro note is what compounds. Every feature that produces a real change in `AGENTS.md`, the per-story template, or your team's working agreements makes the next feature easier.
+
+---
+
+### A summary table
+
+| Phase | Document | Owner | Length | Audience |
+|---|---|---|---|---|
+| 1. Discover | Discovery notes | You | 0.5–2 pages | Yourself |
+| 2. Layer 1 | Feature document | Tech lead | 3–5 pages | Cross-team |
+| 3. Layer 2 | Per-story breakdown | Story lead | 1–2 pages | Your team + agent |
+| 4. Layer 3 | Code, commits, PRs, occasional ADRs | Engineers | n/a | Reviewers, future maintainers |
+| 5. Verify | Verification report | Implementing engineer | 0.5 pages | Tech lead, PM, partner teams |
+| 6. Close the loop | Outcome note + retro note | PM + team | 0.5 pages each | Stakeholders, team |
+
+A few things worth re-emphasising:
+
+**The longest documents are the ones that cross the most boundaries.** The feature document is longest because it's read by the most people.
+
+**Layer 3 produces no document of its own.** This is deliberate. The code, the commits, and the PRs *are* the artifact.
+
+**The agent's involvement varies by phase.** Heavy in discover (exploration), heavy in Layer 2 (design conversation), heaviest in Layer 3 (execution), light in verify (the agent isn't your verifier). The PM and team own the start and end of the workflow; the agent owns the middle.
+
+**Every document earns its length by the number of people who read it and the durability of what it captures.** Documents that lots of people read should be sharp and short. Documents that few people read can be informal. Documents that nobody reads shouldn't exis
